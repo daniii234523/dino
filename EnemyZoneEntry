@@ -1,0 +1,104 @@
+-- // Services & Requires
+local CollectionService: CollectionService = game:GetService('CollectionService')
+local Players          : Players           = game:GetService('Players')
+local ReplicatedStorage                    = game:GetService('ReplicatedStorage')
+local RunService       : RunService        = game:GetService('RunService')
+
+local spr = require( ReplicatedStorage.Utility.spr )
+
+-- // Variables & Constants
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+	return
+end
+local PlayerGui = LocalPlayer.PlayerGui
+
+local Ui = PlayerGui:WaitForChild('Ui')
+local IncomingFrame = Ui.Backing.IncomingFrame
+
+local DETECTION_RADIUS = 25
+
+-- // Tables & Types
+local InsideEnemies: { [Model]: boolean } = {}
+local Enemies: { Model } = {}
+
+-- // Functions
+
+local function SetupViewportModel( Viewport: ViewportFrame , Model: Model ): Model
+	Viewport:ClearAllChildren()
+	local Clone = Model:Clone()
+	Clone.Parent = Viewport
+	local BoundingCFrame, Size = Clone:GetBoundingBox()
+	local Offset = BoundingCFrame.Position
+	Clone:PivotTo( Clone:GetPivot() - Offset )
+	local Camera = Instance.new("Camera")
+	Viewport.CurrentCamera = Camera
+	Camera.Parent = Viewport
+	local MaxSize = math.max(Size.X, Size.Y, Size.Z)
+	local FOV = math.rad(Camera.FieldOfView)
+	local AspectRatio = Viewport.AbsoluteSize.X / Viewport.AbsoluteSize.Y
+	local FittedFOV = (AspectRatio >= 1)
+		and FOV
+		or (2 * math.atan(math.tan(FOV / 2) * AspectRatio))
+	local Distance = (MaxSize / 2) / math.tan(FittedFOV / 2)
+
+	local CameraPosition = Vector3.new(Distance, Distance * 0.4, Distance) * 0.85
+	Camera.CFrame = CFrame.lookAt(
+		CameraPosition,
+		Vector3.new(0, 0, 0)
+	)
+	return Clone
+end
+
+local function GetCharacterRoot(): BasePart?
+	local Character = LocalPlayer.Character
+	if not Character then
+		return nil
+	end
+	return Character.PrimaryPart
+end
+
+
+function Required()
+	for __ , Enemy in CollectionService:GetTagged('Enemy') do
+		if not Enemy:IsA('Model') then
+			continue
+		end
+		table.insert( Enemies , Enemy )
+	end
+	CollectionService:GetInstanceAddedSignal('Enemy'):Connect(function( Enemy: Model )
+		table.insert( Enemies , Enemy )
+	end)
+
+	RunService.Heartbeat:Connect(function()
+		local Root = GetCharacterRoot()
+		if not Root then
+			return
+		end
+		
+		for __ , Enemy: Model in Enemies do
+			if not Enemy then
+				continue
+			end
+			
+			if not Enemy:IsA('Model') then
+				continue
+			end
+			if Enemy:GetAttribute("Weight") == nil then
+				continue
+			end
+			local EnemyPrimary = Enemy.PrimaryPart
+			if not EnemyPrimary then
+				continue
+			end
+			
+			local Distance = (EnemyPrimary.Position - Root.Position).Magnitude
+			local InRange = Distance <= DETECTION_RADIUS
+			if InRange and not InsideEnemies[Enemy] then
+				InsideEnemies[Enemy] = true
+			elseif not InRange and InsideEnemies[Enemy] then
+				InsideEnemies[Enemy] = nil
+			end
+		end
+	end)
+end ; Required()
