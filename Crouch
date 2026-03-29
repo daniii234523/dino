@@ -1,0 +1,121 @@
+-- // Services & Requires
+local UserInputService: UserInputService = game:GetService('UserInputService')
+local Players         : Players          = game:GetService('Players')
+local ReplicatedStorage                  = game:GetService('ReplicatedStorage')
+
+local AnimationData    = require( ReplicatedStorage.Modules.AnimationData )
+local AnimationHandler = require( ReplicatedStorage.Modules.Client.AnimationHandler )
+
+-- // Variables & Constants
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+	return
+end
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character and Character:FindFirstChildWhichIsA('Humanoid')
+
+local IsPressed = false
+local IsRunning = false
+local RunningConnection: RBXScriptConnection? = nil
+
+local Net = script.Net
+
+-- // Tables & Types
+local ControlKeyCodes: { [Enum.KeyCode]: boolean } = {
+	[Enum.KeyCode.LeftShift] = true,
+	[Enum.KeyCode.RightShift] = true,
+}
+
+-- // Functions
+
+local ControlIsDown = function( Input: InputObject ): boolean
+	local IsDown = false
+	for KeyCode in ControlKeyCodes do
+		if KeyCode ~= Input.KeyCode then
+			continue
+		end
+		IsDown = true
+	end
+	return IsDown
+end
+
+local OnCharacterAdded = function( NewCharacter: Model )
+	Character = NewCharacter
+	Humanoid = NewCharacter and NewCharacter:FindFirstChildWhichIsA('Humanoid')
+	
+	-- ==============================================
+	
+	if not Humanoid then
+		return
+	end
+	if RunningConnection then
+		RunningConnection:Disconnect()
+	end
+	RunningConnection = Humanoid:GetPropertyChangedSignal('MoveDirection'):Connect(function()
+		if not Humanoid then
+			return
+		end
+		IsRunning = Humanoid.MoveDirection.Magnitude ~= 0
+		
+		if not IsPressed then
+			return
+		end
+		AnimationHandler:Play( AnimationData.CrouchWalkId )
+		if IsRunning then
+			AnimationHandler:AdjustSpeed( AnimationData.CrouchWalkId , 1 )
+		else
+			AnimationHandler:AdjustSpeed( AnimationData.CrouchWalkId , 0 )
+		end
+	end)
+	
+	-- ==============================================
+
+	local NNet = Net:Clone()
+	local RightHand = Character:FindFirstChild('RightHand')
+	if not RightHand or not RightHand:IsA('BasePart') or not NNet.PrimaryPart then
+		return
+	end
+
+	NNet.Parent = Character
+	local Weld = Instance.new('Motor6D')
+	Weld.Part0 = RightHand
+	Weld.Part1 = NNet.PrimaryPart
+	Weld.C0 = CFrame.new(0.25, -0.5, -0.100000001, 0.342020094, 0.939692616, 3.78551732e-08, 7.59040386e-09, -4.30473115e-08, 1, 0.939692616, -0.342020094, -2.18556924e-08)
+	Weld.C1 = CFrame.new(0, 0.300000012, 0, 0.945729494, -0.0479752943, 0.321393818, 0.163175926, 0.925416529, -0.342020154, -0.281014621, 0.375902295, 0.883022189)
+	Weld.Parent = RightHand
+end
+
+function Required()
+	OnCharacterAdded( Character )
+	LocalPlayer.CharacterAdded:Connect( OnCharacterAdded )
+	
+	-- ==============================================
+	
+	UserInputService.InputBegan:Connect(function( Input: InputObject )
+		if not ControlIsDown( Input ) then
+			return
+		end
+		
+		if Humanoid then
+			Humanoid.WalkSpeed = 8
+		end
+		AnimationHandler:Play( AnimationData.CrouchWalkId )
+		if IsRunning then
+			AnimationHandler:AdjustSpeed( AnimationData.CrouchWalkId , 1 )
+		else
+			AnimationHandler:AdjustSpeed( AnimationData.CrouchWalkId , 0 )
+		end
+		IsPressed = true
+	end)
+	UserInputService.InputEnded:Connect(function( Input: InputObject )
+		if not ControlIsDown( Input ) then
+			return
+		end
+		
+		if Humanoid then
+			Humanoid.WalkSpeed = 16
+		end
+		AnimationHandler:Stop( AnimationData.CrouchWalkId )
+		IsPressed = false
+	end)
+end ; Required()
