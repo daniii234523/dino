@@ -1,0 +1,43 @@
+-- // Services & Requires
+local PhysicsService: PhysicsService = game:GetService('PhysicsService')
+local Players       : Players        = game:GetService('Players')
+
+-- // Variables & Constants
+local PlayerCollision = 'Player'
+
+-- // Tables & Types
+local Connections = {}
+
+-- // Functions
+
+local OnCharacterAdded = function( Character: Model )
+	for __ , BasePart: BasePart in Character:GetDescendants() do
+		if not BasePart:IsA('BasePart') then
+			continue
+		end
+		BasePart.CollisionGroup = PlayerCollision
+	end
+end
+
+local OnPlayerAdded, OnPlayerRemoving = function( Player: Player )
+	Connections[Player] = Player.CharacterAdded:Connect( OnCharacterAdded )
+	OnCharacterAdded( Player.Character or Player.CharacterAdded:Wait() )
+end , function( Player: Player )
+	if Connections[Player] then
+		Connections[Player]:Disconnect()
+	end
+end
+
+function Required()
+	PhysicsService:RegisterCollisionGroup( PlayerCollision )
+	PhysicsService:RegisterCollisionGroup( 'Dino' )
+	PhysicsService:CollisionGroupSetCollidable( PlayerCollision , PlayerCollision , false )
+	PhysicsService:CollisionGroupSetCollidable( PlayerCollision , 'Dino' , false )
+	PhysicsService:CollisionGroupSetCollidable( 'Dino' , 'Dino' , false )
+	
+	Players.PlayerRemoving:Connect( OnPlayerRemoving )
+	Players.PlayerAdded:Connect( OnPlayerAdded )
+	for __ , Player: Player in Players:GetPlayers() do
+		OnPlayerAdded( Player )
+	end
+end ; Required()
