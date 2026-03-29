@@ -1,0 +1,90 @@
+local AnimationHandler = {} :: AnimationHandlerClass
+AnimationHandler.__index = AnimationHandler
+
+-- // Services & Requires
+local Players: Players  = game:GetService('Players')
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+
+local rbxassetid = require( ReplicatedStorage.Utility.rbxassetid )
+
+-- // Variables & Constants
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+	return AnimationHandler.new()
+end
+
+-- // Tables & Types
+local Animations: { [number]: Animation } = {}
+local AnimationTracks: { [number]: AnimationTrack } = {}
+
+type AnimationHandlerClass = {
+	__index: AnimationHandlerClass,
+	Humanoid: Humanoid?,
+	Animator: Animator?,
+	
+	new: () -> AnimationHandlerClass,
+	Play: ( self: AnimationHandlerClass , AnimationId: number ) -> AnimationHandlerClass,
+	Stop: ( self: AnimationHandlerClass , AnimationId: number ) -> AnimationHandlerClass,
+	AdjustSpeed: ( self: AnimationHandlerClass , AnimationId: number , Speed: number ) -> AnimationHandlerClass,
+}
+
+-- // Functions
+
+function AnimationHandler:Play( AnimationId: number )
+	if not Animations[AnimationId] then
+		Animations[AnimationId] = Instance.new('Animation')
+		Animations[AnimationId].AnimationId = rbxassetid .. AnimationId
+	end
+	if not AnimationTracks[AnimationId] then
+		if not self.Animator then
+			return self
+		end
+		AnimationTracks[AnimationId] = self.Animator:LoadAnimation( Animations[AnimationId] )
+	end
+	if AnimationTracks[AnimationId].IsPlaying then
+		return self
+	end
+	AnimationTracks[AnimationId]:Play()
+	return self
+end
+
+function AnimationHandler:Stop( AnimationId: number , FadeTime: number? )
+	if not AnimationTracks[AnimationId] then
+		return self
+	end
+	AnimationTracks[AnimationId]:Stop( FadeTime )
+	return self
+end
+
+function AnimationHandler:AdjustSpeed( AnimationId: number , Speed: number )
+	if not AnimationTracks[AnimationId] then
+		return self
+	end
+	AnimationTracks[AnimationId]:AdjustSpeed( Speed )
+	return self
+end
+
+local OnCharacterAdded = function( self: AnimationHandlerClass , Character: Model )
+	local Humanoid = Character:FindFirstChildWhichIsA('Humanoid')
+	local Animator = Humanoid and Humanoid:FindFirstChildWhichIsA('Animator')
+	self.Humanoid = Humanoid
+	self.Animator = Animator
+end
+
+local Cached: AnimationHandlerClass? = nil
+function AnimationHandler.new(): AnimationHandlerClass
+	if Cached then
+		return Cached
+	end
+	local self = setmetatable( {} :: AnimationHandlerClass , AnimationHandler )
+	Cached = self
+	
+	OnCharacterAdded( self , LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait() )
+	LocalPlayer.CharacterAdded:Connect(function( NewCharacter: Model )
+		OnCharacterAdded( self , NewCharacter )
+	end)
+	
+	return self
+end
+
+return AnimationHandler.new()
