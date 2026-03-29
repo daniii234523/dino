@@ -1,0 +1,262 @@
+local Registry = {}
+
+-- // Services & Requires
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+local ServerStorage = game:GetService('ServerStorage')
+local TweenService = game:GetService('TweenService')
+
+local SimplePath = require( ReplicatedStorage.Modules.SimplePath )
+
+-- // Variables & Constants
+local EnemiesFolder = ServerStorage.Assets.Enemies
+local Baseplate = script.ReferenceBaseplate
+
+local ENEMY_COUNT = 15
+local ROAM_SPEED = 8
+local MIN_TWEEN_TIME = 0.2
+local ROAM_DELAY_MIN = 0.5
+local ROAM_DELAY_MAX = 2.0
+
+-- // Tables & Types
+type EnemyPoolInfo = {
+	Model: Model,
+	Weight: number,
+}
+
+type PathType = {
+	Visualize: boolean,
+	Run: ( self: PathType , Target: Instance ) -> (),
+	Reached: RBXScriptSignal,
+	WaypointReached: RBXScriptSignal,
+}
+
+type RoamingInfo = {
+	Path: PathType,
+	GoalPart: Part,
+	Busy: boolean,
+}
+
+-- // Functions
+
+local function GetGroundedPosition( Model: Model ): Vector3
+	local PrimaryPart = Model.PrimaryPart
+	if not PrimaryPart then
+		return Baseplate.Position
+	end
+
+	local Size = Baseplate.Size
+	local Position = Baseplate.Position
+	local HalfHeight = PrimaryPart.Size.Y / 2
+
+	return Vector3.new(
+		Position.X + ( ( math.random() - 0.5 ) * Size.X ),
+		Position.Y + ( Size.Y / 2 ) + HalfHeight,
+		Position.Z + ( ( math.random() - 0.5 ) * Size.Z )
+	)
+end
+
+local function GetEnemyPool(): { EnemyPoolInfo }
+	local Pool: { EnemyPoolInfo } = {}
+
+	for __ , Enemy in EnemiesFolder:GetChildren() do
+		if not Enemy:IsA('Model') then
+			continue
+		end
+
+		local Weight = Enemy:GetAttribute('Weight')
+		if typeof( Weight ) ~= 'number' or Weight <= 0 then
+			continue
+		end
+
+		if not Enemy.PrimaryPart then
+			continue
+		end
+
+		table.insert( Pool , {
+			Model = Enemy,
+			Weight = Weight,
+		} )
+	end
+
+	return Pool
+end
+
+local function GetRandomEnemy( Pool: { EnemyPoolInfo } ): Model?
+	local TotalWeight = 0
+
+	for __ , Info in Pool do
+		TotalWeight += Info.Weight
+	end
+
+	if TotalWeight <= 0 then
+		return nil
+	end
+
+	local Roll = math.random( 1 , TotalWeight )
+	local Cumulative = 0
+
+	for __ , Info in Pool do
+		Cumulative += Info.Weight
+		if Roll <= Cumulative then
+			return Info.Model
+		end
+	end
+
+	return nil
+end
+
+local function TweenModelToward( Model: Model , Destination: Vector3 )
+	local CurrentPivot = Model:GetPivot()
+	local CurrentPosition = CurrentPivot.Position
+	local Delta = Destination - CurrentPosition
+	local Distance = Delta.Magnitude
+	if Distance <= 0.001 then
+		return
+	end
+
+	local TweenTime = math.max( MIN_TWEEN_TIME , Distance / ROAM_SPEED )
+
+	local FlatDirection = Vector3.new( Delta.X , 0 , Delta.Z )
+	local TargetCFrame: CFrame
+
+	if FlatDirection.Magnitude > 0.001 then
+		TargetCFrame = CFrame.lookAt( Destination , Destination + FlatDirection.Unit )
+	else
+		TargetCFrame = CFrame.new( Destination ) * ( CurrentPivot - CurrentPosition )
+	end
+
+	local Value = Instance.new( 'CFrameValue' )
+	Value.Value = CurrentPivot
+
+	local Connection = Value:GetPropertyChangedSignal( 'Value' ):Connect(function()
+		if Model.Parent then
+			Model:PivotTo( Value.Value )
+		end
+	end)
+
+	local Tween = TweenService:Create(
+		Value,
+		TweenInfo.new( TweenTime , Enum.EasingStyle.Linear ),
+		{ Value = TargetCFrame }
+	)
+
+	Tween:Play()
+	Tween.Completed:Wait()
+
+	Connection:Disconnect()
+	Value:Destroy()
+end
+
+local function StartRoaming( Enemy: Model )
+	local PrimaryPart = Enemy.PrimaryPart
+	if not PrimaryPart then
+		return
+	end
+
+	local GoalPart = Instance.new('Part')
+	GoalPart.Name = 'RoamGoal'
+	GoalPart.Size = Vector3.new( 1 , 1 , 1 )
+	GoalPart.Transparency = 1
+	GoalPart.Anchored = true
+	GoalPart.CanCollide = false
+	GoalPart.CanQuery = false
+	GoalPart.CanTouch = false
+	GoalPart.Position = GetGroundedPosition( Enemy )
+	GoalPart.Parent = workspace
+
+	local Path = SimplePath.new( Enemy ) :: PathType
+	Path.Visualize = false
+
+	local Info: RoamingInfo = {
+		Path = Path,
+		GoalPart = GoalPart,
+		Busy = false,
+	}
+
+	local function RunNextPath()
+		if Info.Busy then
+			return
+		end
+
+		if not Enemy.Parent or not Enemy.PrimaryPart then
+			if GoalPart.Parent then
+				GoalPart:Destroy()
+			end
+			return
+		end
+
+		Info.Busy = true
+		GoalPart.Position = GetGroundedPosition( Enemy )
+		Path:Run( GoalPart )
+	end
+
+	Path.Reached:Connect(function( CurrentModel: Model , FinalWaypoint )
+		if not CurrentModel.PrimaryPart or not Enemy.Parent then
+			return
+		end
+
+		TweenModelToward( CurrentModel , FinalWaypoint.Position )
+		Info.Busy = false
+
+		task.delay( math.random( ROAM_DELAY_MIN * 100 , ROAM_DELAY_MAX * 100 ) / 100 , function()
+			if Enemy.Parent then
+				RunNextPath()
+			elseif GoalPart.Parent then
+				GoalPart:Destroy()
+			end
+		end)
+	end)
+
+	Path.WaypointReached:Connect(function( CurrentModel: Model , __ , NextWaypoint )
+		if not CurrentModel.PrimaryPart or not Enemy.Parent then
+			return
+		end
+
+		TweenModelToward( CurrentModel , NextWaypoint.Position )
+		Path:Run( GoalPart )
+	end)
+
+	RunNextPath()
+end
+
+local function SpawnEnemy( Template: Model )
+	local Enemy = Template:Clone()
+	Enemy:PivotTo( CFrame.new( GetGroundedPosition( Enemy ) ) )
+	Enemy.Parent = workspace
+
+	StartRoaming( Enemy )
+end
+
+function Required()
+	local Pool = GetEnemyPool()
+	local PoolCount = #Pool
+
+	if PoolCount == 0 then
+		return
+	end
+
+	local SpawnCount = ENEMY_COUNT
+	if PoolCount > SpawnCount then
+		SpawnCount = PoolCount
+	end
+
+	local SpawnList: { Model } = {}
+
+	for __ , Info in Pool do
+		table.insert( SpawnList , Info.Model )
+	end
+
+	while #SpawnList < SpawnCount do
+		local Enemy = GetRandomEnemy( Pool )
+		if not Enemy then
+			break
+		end
+		table.insert( SpawnList , Enemy )
+	end
+
+	for __ , Template in SpawnList do
+		SpawnEnemy( Template )
+	end
+end ; Required()
+
+return Registry
