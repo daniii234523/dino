@@ -1,0 +1,58 @@
+-- // Services & Requires
+local ContentProvider: ContentProvider = game:GetService('ContentProvider')
+local Players: Players = game:GetService('Players')
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+
+local rbxassetid = require( ReplicatedStorage.Utility.rbxassetid )
+
+-- // Variables & Constants
+
+local HOLDING_ANIMATION_ID = 0
+
+-- // Tables & Types
+local CharacterConnections: { [Player]: RBXScriptConnection } = {}
+local HoldingAnimations: { [Player]: Animation } = {}
+local HoldingAnimationTracks: { [Player]: AnimationTrack } = {}
+
+-- // Functions
+
+local OnCharacterAdded = function( Character: Model , Player: Player )
+	local Humanoid = Character:FindFirstChildWhichIsA('Humanoid')
+	local Animator = Humanoid and Humanoid:FindFirstChildWhichIsA('Animator')
+	if not Animator or not Animator:IsA('Animator') then
+		return
+	end
+	if not HoldingAnimations[Player] then
+		HoldingAnimations[Player] = Instance.new('Animation')
+		HoldingAnimations[Player].AnimationId = rbxassetid .. HOLDING_ANIMATION_ID
+	end
+	if HoldingAnimationTracks[Player] then
+		HoldingAnimationTracks[Player]:Destroy()
+	end
+	local HoldingAnimationTrack = Animator:LoadAnimation( HoldingAnimations[Player] )
+	HoldingAnimationTrack.Looped = true
+	HoldingAnimationTrack.Priority = Enum.AnimationPriority.Action4
+	ContentProvider:PreloadAsync( Animator:GetChildren() )
+	HoldingAnimationTrack:Play()
+	HoldingAnimationTracks[Player] = HoldingAnimationTrack
+end
+
+local OnPlayerAdded , OnPlayerRemoving = function( Player: Player )
+	CharacterConnections[Player] = Player.CharacterAdded:Connect(function( NewCharacter: Model )
+		OnCharacterAdded( NewCharacter , Player )
+	end)
+	OnCharacterAdded( Player.Character or Player.CharacterAdded:Wait() , Player )
+end , function( Player: Player )
+	if CharacterConnections[Player] then
+		CharacterConnections[Player]:Disconnect()
+	end
+end
+
+function Required()
+	task.wait( 1.75 )
+	Players.PlayerRemoving:Connect( OnPlayerRemoving )
+	Players.PlayerAdded:Connect( OnPlayerAdded )
+	for __ , Player: Player in Players:GetPlayers() do
+		OnPlayerAdded( Player )
+	end
+end ; Required()
